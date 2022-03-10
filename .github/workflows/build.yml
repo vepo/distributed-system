@@ -30,6 +30,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          BASE_BRANCH: ${{ github.base_ref }}
         run: mvn -B verify sonar:sonar \
                               -Dsonar.projectKey=vepo_distributed-system \
                               -Dsonar.branch.name=${BASE_BRANCH}
