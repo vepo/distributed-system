@@ -33,4 +33,5 @@ jobs:
           BASE_BRANCH: ${{ github.base_ref }}
         run: mvn -B verify sonar:sonar \
                               -Dsonar.projectKey=vepo_distributed-system \
-                              -Dsonar.branch.name=${BASE_BRANCH}
+                              -Dsonar.branch.name=${BASE_BRANCH} \
+                              -Dsonar.branch.target=main
