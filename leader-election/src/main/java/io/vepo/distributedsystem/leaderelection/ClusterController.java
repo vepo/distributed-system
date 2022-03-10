@@ -35,7 +35,7 @@ public class ClusterController implements AutoCloseable {
 
     public enum LeaderStatus {
         NO_LEADER, WAITING_ELECTION_RESULT, ELECTED, LEADER_DEAD
-    };
+    }
 
     private class ConsumeCommands implements Runnable {
         protected byte[] buf = new byte[256];
@@ -55,27 +55,22 @@ public class ClusterController implements AutoCloseable {
                                 brokers.put(joinCommand.id(),
                                         new Broker(joinCommand.id(), joinCommand.hostname(), joinCommand.startup()));
                             } else if (command instanceof ApplyForLeaderCommand applyCommand) {
-                                if (Objects.isNull(leader) && (leaderStatus == LeaderStatus.NO_LEADER
-                                        || leaderStatus == LeaderStatus.WAITING_ELECTION_RESULT) &&
-                                        !config.id().equals(applyCommand.id())) {
-                                    sendCommand(new AcceptLeaderCommand(config.id(), applyCommand.id()));
+                                if (isWaitingElectionResults() && !config.id().equals(applyCommand.id())) {
+                                    acceptLeader(applyCommand.id());
                                 }
                             } else if (command instanceof AcceptLeaderCommand acceptLeaderCommand) {
-                                if (Objects.isNull(leader) && (leaderStatus == LeaderStatus.NO_LEADER
-                                        || leaderStatus == LeaderStatus.WAITING_ELECTION_RESULT) &&
-                                        config.id().equals(acceptLeaderCommand.leaderId())) {
+                                if (isWaitingElectionResults() && config.id().equals(acceptLeaderCommand.leaderId())) {
                                     acceptedVotes.add(acceptLeaderCommand.brokerId());
 
                                     if (acceptedVotes.equals(brokers.keySet().stream()
                                             .filter(id -> !id.equals(config.id())).collect(Collectors.toSet()))) {
-
+                                        wonElection();
                                     }
                                 }
                             } else if (command instanceof LeaderElectedCommand leaderElectedCommand &&
                                     !leaderElectedCommand.leaderId().equals(config.id())) {
                                 logger.info("Process won the election! {}", leaderElectedCommand);
-                                leaderStatus = LeaderStatus.ELECTED;
-                                leader = brokers.get(leaderElectedCommand.leaderId());
+                                leaderSelected(leaderElectedCommand.leaderId());
                             }
                         });
                     }
@@ -98,64 +93,88 @@ public class ClusterController implements AutoCloseable {
     private long startTimestamp;
     private ClusterConfig config;
     private Broker leader;
+    private String hostName;
     private Map<String, Broker> brokers;
     private Map<String, Long> heartbeats;
     private LeaderStatus leaderStatus;
     private Set<String> acceptedVotes;
 
     public ClusterController(ClusterConfig config) throws IOException {
-        this.config = config;
-        this.startTimestamp = System.nanoTime();
-        this.pid = ProcessHandle.current().pid();
+        try {
+            this.config = config;
+            this.startTimestamp = System.nanoTime();
+            this.pid = ProcessHandle.current().pid();
 
-        this.address = InetAddress.getByName(config.multicastIp());
+            this.address = InetAddress.getByName(config.multicastIp());
+            this.hostName = InetAddress.getLocalHost().getHostName();
 
-        this.outputSocket = new DatagramSocket();
-        this.outputSocket.setBroadcast(true);
+            this.outputSocket = new DatagramSocket();
+            this.outputSocket.setBroadcast(true);
 
-        this.inputSocket = new MulticastSocket(config.multicastPort());
-        this.group = new InetSocketAddress(address, config.multicastPort());
-        this.networkInterface = NetworkInterface.networkInterfaces().filter(net -> {
-            try {
-                return net.supportsMulticast();
-            } catch (SocketException e) {
-                return false;
-            }
-        }).findFirst().orElseThrow(() -> new UnsupportedOperationException("No Multicast interface"));
-        this.inputSocket.joinGroup(group, networkInterface);
+            this.inputSocket = new MulticastSocket(config.multicastPort());
+            this.group = new InetSocketAddress(address, config.multicastPort());
+            this.networkInterface = NetworkInterface.networkInterfaces().filter(net -> {
+                try {
+                    return net.supportsMulticast();
+                } catch (SocketException e) {
+                    return false;
+                }
+            }).findFirst().orElseThrow(() -> new UnsupportedOperationException("No Multicast interface"));
+            this.inputSocket.joinGroup(group, networkInterface);
 
-        this.acceptedVotes = Collections.synchronizedSet(new HashSet<>());
-        this.brokers = Collections.synchronizedMap(new HashMap<>());
-        this.heartbeats = Collections.synchronizedMap(new HashMap<>());
-        this.leader = null;
-        this.leaderStatus = LeaderStatus.NO_LEADER;
-        this.threadPool = Executors.newFixedThreadPool(1);
-        this.threadPool.submit(new ConsumeCommands());
+            this.acceptedVotes = Collections.synchronizedSet(new HashSet<>());
+            this.brokers = Collections.synchronizedMap(new HashMap<>());
+            this.heartbeats = Collections.synchronizedMap(new HashMap<>());
+            this.leader = null;
+            this.leaderStatus = LeaderStatus.NO_LEADER;
+            this.threadPool = Executors.newFixedThreadPool(1);
+            this.threadPool.submit(new ConsumeCommands());
+
+        } catch (UnknownHostException ex) {
+            throw new IllegalStateException("Could not resolve hostname!", ex);
+        }
+    }
+
+    private boolean isWaitingElectionResults() {
+        return Objects.isNull(leader) && (leaderStatus == LeaderStatus.NO_LEADER
+                || leaderStatus == LeaderStatus.WAITING_ELECTION_RESULT);
+    }
+
+    private void acceptLeader(String leaderId) {
+        sendCommand(new AcceptLeaderCommand(config.id(), leaderId));
+    }
+
+    private void leaderSelected(String leaderId) {
+        leaderStatus = LeaderStatus.ELECTED;
+        leader = brokers.get(leaderId);
+    }
+
+    private void wonElection() {
+        leaderStatus = LeaderStatus.ELECTED;
+        sendCommand(new LeaderElectedCommand(config.id()));
+        leader = new Broker(config.id(), hostName, startTimestamp);
+    }
+
+    private void applyForLeader() {
+        sendCommand(new ApplyForLeaderCommand(config.id()));
+        leaderStatus = LeaderStatus.WAITING_ELECTION_RESULT;
     }
 
     public void joinCluster() {
-        try {
-            String hostName = InetAddress.getLocalHost().getHostName();
-            sendCommand(new JoinCommand(config.id(), hostName, pid, startTimestamp));
-            while (running.get()) {
-                try {
-                    Thread.sleep(config.timeout().toMillis());
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-
-                if (leaderStatus == LeaderStatus.NO_LEADER
-                        && brokers.values().stream().filter(broker -> !broker.id().equals(config.id())).count() > 0L) {
-                    sendCommand(new ApplyForLeaderCommand(config.id()));
-                    leaderStatus = LeaderStatus.WAITING_ELECTION_RESULT;
-                } else if (leaderStatus == LeaderStatus.NO_LEADER) {
-                    sendCommand(new LeaderElectedCommand(config.id()));
-                    leaderStatus = LeaderStatus.ELECTED;
-                    leader = new Broker(config.id(), hostName, startTimestamp);
-                }
+        sendCommand(new JoinCommand(config.id(), hostName, pid, startTimestamp));
+        while (running.get()) {
+            try {
+                Thread.sleep(config.timeout().toMillis());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
-        } catch (UnknownHostException ex) {
-            throw new IllegalStateException("Could not resolve hostname!", ex);
+
+            if (leaderStatus == LeaderStatus.NO_LEADER
+                    && brokers.values().stream().filter(broker -> !broker.id().equals(config.id())).count() > 0L) {
+                applyForLeader();
+            } else if (leaderStatus == LeaderStatus.NO_LEADER) {
+                wonElection();
+            }
         }
     }
 

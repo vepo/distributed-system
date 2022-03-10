@@ -1,7 +1,9 @@
 module io.vepo.distributedsystem.leaderelection.test {
-    requires org.junit.jupiter.api;
     requires io.vepo.distributedsystem.leaderelection;
+    exports io.vepo.distributedsystem.leaderelection.test;
 
-    opens io.vepo.distributedsystem.leaderelection.test;
-    opens io.vepo.distributedsystem.leaderelection.test.commands;
+    requires transitive org.junit.jupiter.engine;
+    requires transitive org.junit.jupiter.api;
+
+    opens io.vepo.distributedsystem.leaderelection.test.commands to org.junit.platform.commons;
 }
