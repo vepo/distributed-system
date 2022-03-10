@@ -1,9 +1,7 @@
 name: Build
-on:
-  push:
-    branches:
-      - main        # The default branch
-      - '*'         # The other branches to be analyzed
+
+on: [push]
+
 jobs:
   build:
     name: Build
@@ -32,6 +30,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+        run: mvn -B verify sonar:sonar \
                               -Dsonar.projectKey=vepo_distributed-system \
                               -Dsonar.branch.name=${BASE_BRANCH}

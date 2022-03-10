@@ -11,10 +11,12 @@
     <sonar.organization>vepo-github</sonar.organization>
     <sonar.host.url>https://sonarcloud.io</sonar.host.url>
     <sonar.java.coveragePlugin>jacoco</sonar.java.coveragePlugin>
+    <sonar.coverage.jacoco.xmlReportPaths>report-aggregate/target/site/jacoco-aggregate/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
   </properties>
 
   <modules>
     <module>leader-election</module>
+    <module>report-aggregate</module>
   </modules>
 
   <build>
@@ -85,25 +87,6 @@
             <id>prepare-agent</id>
             <goals>
               <goal>prepare-agent</goal>
-            </goals>
-            <configuration>
-              <append>true</append>
-            </configuration>
-          </execution>
-          <execution>
-            <id>prepare-agent-integration</id>
-            <goals>
-              <goal>prepare-agent-integration</goal>
-            </goals>
-            <configuration>
-              <append>true</append>
-            </configuration>
-          </execution>
-          <execution>
-            <id>jacoco-site</id>
-            <phase>verify</phase>
-            <goals>
-              <goal>report</goal>
             </goals>
           </execution>
         </executions>
