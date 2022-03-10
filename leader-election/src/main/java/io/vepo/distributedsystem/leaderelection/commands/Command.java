@@ -1,4 +1,4 @@
-package io.vepo.distributedsystem.leaderelection;
+package io.vepo.distributedsystem.leaderelection.commands;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.HashMap;
@@ -23,16 +23,20 @@ public abstract class Command {
         return commandId;
     }
 
-    protected abstract void load(byte[] data);
+    public abstract void load(byte[] data);
 
-    public static Optional<Command> loadCommand(byte[] data) throws InstantiationException, IllegalAccessException,
-            IllegalArgumentException, InvocationTargetException, NoSuchMethodException, SecurityException {
+    public static Optional<Command> loadCommand(byte[] data) {
         if (data.length > 0) {
             var cmdClass = COMMANDS.get(data[0]);
             if (Objects.nonNull(cmdClass)) {
-                var cmd = cmdClass.getDeclaredConstructor().newInstance();
-                cmd.load(data);
-                return Optional.of(cmd);
+                try {
+                    var cmd = cmdClass.getDeclaredConstructor().newInstance();
+                    cmd.load(data);
+                    return Optional.of(cmd);
+                } catch (InstantiationException | IllegalAccessException | IllegalArgumentException
+                        | InvocationTargetException | NoSuchMethodException | SecurityException e) {
+                    throw new InvalidCommandException();
+                }
             }
         }
         return Optional.empty();
